@@ -5,6 +5,22 @@ function newConnection(socket: net.Socket) {
     "New connection from ",
     socket.remoteAddress + ":" + socket.remotePort
   );
+
+  socket.on("end", () => {
+    console.log("EOF");
+    console.log("Connection closed");
+  });
+
+  socket.on("data", (data: Buffer) => {
+    console.log("Data: ", data);
+
+    socket.write(data);
+
+    if (data.includes("QUIT")) {
+      console.log("Closing connection");
+      socket.end();
+    }
+  });
 }
 
 const server = net.createServer();
