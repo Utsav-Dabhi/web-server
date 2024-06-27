@@ -109,13 +109,71 @@ function socketWrite(conn, data) {
         });
     });
 }
-function serveClient(socket) {
+function socketListen(server, host, port) {
+    var listener = {
+        server: server,
+        connectionQueue: [],
+        waitingAccepts: [],
+    };
+    server.on("connection", function (socket) {
+        var conn = socketInit(socket);
+        if (listener.waitingAccepts.length > 0) {
+            // If there's a waiting accept, fulfill it
+            var accept = listener.waitingAccepts.shift();
+            accept(conn);
+        }
+        else {
+            // Otherwise, queue the connection
+            listener.connectionQueue.push(conn);
+        }
+    });
+    server.listen({ host: host, port: port }, function () {
+        console.log("Server is listening on port 1234");
+    });
+    server.on("error", function (err) {
+        console.error("Server error:", err);
+    });
+    return listener;
+}
+function soAccept(listener) {
+    return new Promise(function (resolve) {
+        if (listener.connectionQueue.length > 0) {
+            // If there's a connection waiting, resolve immediately
+            resolve(listener.connectionQueue.shift());
+        }
+        else {
+            // Otherwise, add this accept request to the waiting queue
+            listener.waitingAccepts.push(resolve);
+        }
+    });
+}
+function handleConnections(listener) {
     return __awaiter(this, void 0, void 0, function () {
-        var conn, data;
+        var conn;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
-                    conn = socketInit(socket);
+                    if (!true) return [3 /*break*/, 2];
+                    return [4 /*yield*/, soAccept(listener)];
+                case 1:
+                    conn = _a.sent();
+                    // Handle each connection in a separate async function
+                    serveClient(conn).catch(function (err) {
+                        console.error("Error handling connection:", err);
+                    });
+                    return [3 /*break*/, 0];
+                case 2: return [2 /*return*/];
+            }
+        });
+    });
+}
+function serveClient(conn) {
+    return __awaiter(this, void 0, void 0, function () {
+        var data;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    console.log("New connection from ", conn.socket.remoteAddress + ":" + conn.socket.remotePort);
                     _a.label = 1;
                 case 1:
                     if (!true) return [3 /*break*/, 4];
@@ -136,42 +194,14 @@ function serveClient(socket) {
         });
     });
 }
-function newConnection(socket) {
-    return __awaiter(this, void 0, void 0, function () {
-        var excp_1;
-        return __generator(this, function (_a) {
-            switch (_a.label) {
-                case 0:
-                    console.log("New connection from ", socket.remoteAddress + ":" + socket.remotePort);
-                    _a.label = 1;
-                case 1:
-                    _a.trys.push([1, 3, 4, 5]);
-                    return [4 /*yield*/, serveClient(socket)];
-                case 2:
-                    _a.sent();
-                    return [3 /*break*/, 5];
-                case 3:
-                    excp_1 = _a.sent();
-                    console.error("Exception: ", excp_1);
-                    return [3 /*break*/, 5];
-                case 4:
-                    socket.destroy();
-                    return [7 /*endfinally*/];
-                case 5: return [2 /*return*/];
-            }
-        });
+function startServer() {
+    var server = net.createServer({
+        // required by `TCPConn`
+        pauseOnConnect: true,
+    });
+    var listener = socketListen(server, "127.0.0.1", 1234);
+    handleConnections(listener).catch(function (err) {
+        console.error("Error in connection handler:", err);
     });
 }
-var server = net.createServer({
-    // required by `TCPConn`
-    pauseOnConnect: true,
-});
-server.on("connection", function (socket) {
-    // handle each new connection
-    newConnection(socket).catch(function (err) {
-        console.error("Error in new connection:", err);
-    });
-});
-server.listen({ host: "127.0.0.1", port: 1234 }, function () {
-    console.log("Server is listening on port 1234");
-});
+startServer();
