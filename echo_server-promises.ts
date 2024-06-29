@@ -18,10 +18,10 @@ type TCPConn = {
   };
 };
 
-type TCPListener = {
-  server: net.Server;
-  connectionQueue: TCPConn[];
-  waitingAccepts: ((conn: TCPConn) => void)[];
+// a dynamic-sized buffer
+type DynBuf = {
+  data: Buffer;
+  length: number;
 };
 
 // wrapper from net.Socket
@@ -112,93 +112,108 @@ function socketWrite(conn: TCPConn, data: Buffer): Promise<void> {
   });
 }
 
-function socketListen(
-  server: net.Server,
-  host: string,
-  port: number
-): TCPListener {
-  const listener: TCPListener = {
-    server: server,
-    connectionQueue: [],
-    waitingAccepts: [],
-  };
+// append data to DynBuf
+function bufPush(buf: DynBuf, data: Buffer): void {
+  const newLen = buf.length + data.length;
 
-  server.on("connection", (socket: net.Socket) => {
-    const conn = socketInit(socket);
-    if (listener.waitingAccepts.length > 0) {
-      // If there's a waiting accept, fulfill it
-      const accept = listener.waitingAccepts.shift()!;
-      accept(conn);
-    } else {
-      // Otherwise, queue the connection
-      listener.connectionQueue.push(conn);
+  if (buf.data.length < newLen) {
+    // grow the capacity by the power of two
+    let cap = Math.max(buf.data.length, 32);
+
+    while (cap < newLen) {
+      cap *= 2;
     }
-  });
 
-  server.listen({ host, port }, () => {
-    console.log("Server is listening on port 1234");
-  });
+    const grown = Buffer.alloc(cap);
+    buf.data.copy(grown, 0, 0);
+    buf.data = grown;
+  }
 
-  server.on("error", (err: Error) => {
-    console.error("Server error:", err);
-  });
-
-  return listener;
+  data.copy(buf.data, buf.length, 0);
+  buf.length = newLen;
 }
 
-function soAccept(listener: TCPListener): Promise<TCPConn> {
-  return new Promise((resolve) => {
-    if (listener.connectionQueue.length > 0) {
-      // If there's a connection waiting, resolve immediately
-      resolve(listener.connectionQueue.shift()!);
-    } else {
-      // Otherwise, add this accept request to the waiting queue
-      listener.waitingAccepts.push(resolve);
-    }
-  });
+// remove data from the front
+function bufPop(buf: DynBuf, len: number): void {
+  buf.data.copyWithin(0, len, buf.length);
+  buf.length -= len;
 }
 
-async function handleConnections(listener: TCPListener) {
+function cutMessage(buf: DynBuf): null | Buffer {
+  // messages are separated by '\n'
+  const idx = buf.data.subarray(0, buf.length).indexOf("\n");
+
+  if (idx < 0) {
+    // not complete
+    return null;
+  }
+
+  // make a copy of the message and move the remaining data to the front
+  const msg = Buffer.from(buf.data.subarray(0, idx + 1));
+  bufPop(buf, idx + 1);
+
+  return msg;
+}
+
+async function serveClient(socket: net.Socket): Promise<void> {
+  const conn: TCPConn = socketInit(socket);
+  const buf: DynBuf = { data: Buffer.alloc(0), length: 0 };
+
   while (true) {
-    const conn = await soAccept(listener);
+    // try to get 1 message from the buffer
+    const msg: null | Buffer = cutMessage(buf);
 
-    // Handle each connection in a separate async function
-    serveClient(conn).catch((err: Error) => {
-      console.error("Error handling connection:", err);
-    });
+    if (!msg) {
+      const data: Buffer = await socketRead(conn);
+      bufPush(buf, data);
+
+      if (data.length === 0) {
+        console.log("Closing connection");
+        return;
+      }
+
+      continue;
+    }
+
+    // process the message and send the response
+    if (msg.equals(Buffer.from("quit\n"))) {
+      await socketWrite(conn, Buffer.from("Bye.\n"));
+      socket.destroy();
+      return;
+    } else {
+      const reply = Buffer.concat([Buffer.from("Echo: "), msg]);
+      await socketWrite(conn, reply);
+    }
   }
 }
 
-async function serveClient(conn: TCPConn) {
+async function newConnection(socket: net.Socket): Promise<void> {
   console.log(
     "New connection from ",
-    conn.socket.remoteAddress + ":" + conn.socket.remotePort
+    socket.remoteAddress + ":" + socket.remotePort
   );
 
-  while (true) {
-    const data = await socketRead(conn);
-
-    if (data.length === 0) {
-      console.log("Closing connection");
-      break;
-    }
-
-    console.log("data", data);
-    await socketWrite(conn, data);
+  try {
+    await serveClient(socket);
+  } catch (excp) {
+    console.error("Exception: ", excp);
+  } finally {
+    socket.destroy();
   }
 }
 
-function startServer() {
-  const server = net.createServer({
-    // required by `TCPConn`
-    pauseOnConnect: true,
+const server = net.createServer({
+  // required by `TCPConn`
+  pauseOnConnect: true,
+});
+
+server.on("connection", (socket: net.Socket) => {
+  // handle each new connection
+  newConnection(socket).catch((err: Error) => {
+    console.error("Error in new connection:", err);
   });
+});
 
-  const listener: TCPListener = socketListen(server, "127.0.0.1", 1234);
-
-  handleConnections(listener).catch((err: Error) => {
-    console.error("Error in connection handler:", err);
-  });
-}
-
-startServer();
+server.listen({ host: "127.0.0.1", port: 1234 }, () => {
+  console.log("Server is listening on port 1234");
+});

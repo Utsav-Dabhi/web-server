@@ -109,99 +109,116 @@ function socketWrite(conn, data) {
         });
     });
 }
-function socketListen(server, host, port) {
-    var listener = {
-        server: server,
-        connectionQueue: [],
-        waitingAccepts: [],
-    };
-    server.on("connection", function (socket) {
-        var conn = socketInit(socket);
-        if (listener.waitingAccepts.length > 0) {
-            // If there's a waiting accept, fulfill it
-            var accept = listener.waitingAccepts.shift();
-            accept(conn);
+// append data to DynBuf
+function bufPush(buf, data) {
+    var newLen = buf.length + data.length;
+    if (buf.data.length < newLen) {
+        // grow the capacity by the power of two
+        var cap = Math.max(buf.data.length, 32);
+        while (cap < newLen) {
+            cap *= 2;
         }
-        else {
-            // Otherwise, queue the connection
-            listener.connectionQueue.push(conn);
-        }
-    });
-    server.listen({ host: host, port: port }, function () {
-        console.log("Server is listening on port 1234");
-    });
-    server.on("error", function (err) {
-        console.error("Server error:", err);
-    });
-    return listener;
+        var grown = Buffer.alloc(cap);
+        buf.data.copy(grown, 0, 0);
+        buf.data = grown;
+    }
+    data.copy(buf.data, buf.length, 0);
+    buf.length = newLen;
 }
-function soAccept(listener) {
-    return new Promise(function (resolve) {
-        if (listener.connectionQueue.length > 0) {
-            // If there's a connection waiting, resolve immediately
-            resolve(listener.connectionQueue.shift());
-        }
-        else {
-            // Otherwise, add this accept request to the waiting queue
-            listener.waitingAccepts.push(resolve);
-        }
-    });
+// remove data from the front
+function bufPop(buf, len) {
+    buf.data.copyWithin(0, len, buf.length);
+    buf.length -= len;
 }
-function handleConnections(listener) {
+function cutMessage(buf) {
+    // messages are separated by '\n'
+    var idx = buf.data.subarray(0, buf.length).indexOf("\n");
+    if (idx < 0) {
+        // not complete
+        return null;
+    }
+    // make a copy of the message and move the remaining data to the front
+    var msg = Buffer.from(buf.data.subarray(0, idx + 1));
+    bufPop(buf, idx + 1);
+    return msg;
+}
+function serveClient(socket) {
     return __awaiter(this, void 0, void 0, function () {
-        var conn;
+        var conn, buf, msg, data, reply;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
-                    if (!true) return [3 /*break*/, 2];
-                    return [4 /*yield*/, soAccept(listener)];
-                case 1:
-                    conn = _a.sent();
-                    // Handle each connection in a separate async function
-                    serveClient(conn).catch(function (err) {
-                        console.error("Error handling connection:", err);
-                    });
-                    return [3 /*break*/, 0];
-                case 2: return [2 /*return*/];
-            }
-        });
-    });
-}
-function serveClient(conn) {
-    return __awaiter(this, void 0, void 0, function () {
-        var data;
-        return __generator(this, function (_a) {
-            switch (_a.label) {
-                case 0:
-                    console.log("New connection from ", conn.socket.remoteAddress + ":" + conn.socket.remotePort);
+                    conn = socketInit(socket);
+                    buf = { data: Buffer.alloc(0), length: 0 };
                     _a.label = 1;
                 case 1:
-                    if (!true) return [3 /*break*/, 4];
+                    if (!true) return [3 /*break*/, 8];
+                    msg = cutMessage(buf);
+                    if (!!msg) return [3 /*break*/, 3];
                     return [4 /*yield*/, socketRead(conn)];
                 case 2:
                     data = _a.sent();
+                    bufPush(buf, data);
                     if (data.length === 0) {
                         console.log("Closing connection");
-                        return [3 /*break*/, 4];
+                        return [2 /*return*/];
                     }
-                    console.log("data", data);
-                    return [4 /*yield*/, socketWrite(conn, data)];
-                case 3:
-                    _a.sent();
                     return [3 /*break*/, 1];
-                case 4: return [2 /*return*/];
+                case 3:
+                    if (!msg.equals(Buffer.from("quit\n"))) return [3 /*break*/, 5];
+                    return [4 /*yield*/, socketWrite(conn, Buffer.from("Bye.\n"))];
+                case 4:
+                    _a.sent();
+                    socket.destroy();
+                    return [2 /*return*/];
+                case 5:
+                    reply = Buffer.concat([Buffer.from("Echo: "), msg]);
+                    return [4 /*yield*/, socketWrite(conn, reply)];
+                case 6:
+                    _a.sent();
+                    _a.label = 7;
+                case 7: return [3 /*break*/, 1];
+                case 8: return [2 /*return*/];
             }
         });
     });
 }
-function startServer() {
-    var server = net.createServer({
-        // required by `TCPConn`
-        pauseOnConnect: true,
-    });
-    var listener = socketListen(server, "127.0.0.1", 1234);
-    handleConnections(listener).catch(function (err) {
-        console.error("Error in connection handler:", err);
+function newConnection(socket) {
+    return __awaiter(this, void 0, void 0, function () {
+        var excp_1;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    console.log("New connection from ", socket.remoteAddress + ":" + socket.remotePort);
+                    _a.label = 1;
+                case 1:
+                    _a.trys.push([1, 3, 4, 5]);
+                    return [4 /*yield*/, serveClient(socket)];
+                case 2:
+                    _a.sent();
+                    return [3 /*break*/, 5];
+                case 3:
+                    excp_1 = _a.sent();
+                    console.error("Exception: ", excp_1);
+                    return [3 /*break*/, 5];
+                case 4:
+                    socket.destroy();
+                    return [7 /*endfinally*/];
+                case 5: return [2 /*return*/];
+            }
+        });
     });
 }
-startServer();
+var server = net.createServer({
+    // required by `TCPConn`
+    pauseOnConnect: true,
+});
+server.on("connection", function (socket) {
+    // handle each new connection
+    newConnection(socket).catch(function (err) {
+        console.error("Error in new connection:", err);
+    });
+});
+server.listen({ host: "127.0.0.1", port: 1234 }, function () {
+    console.log("Server is listening on port 1234");
+});
