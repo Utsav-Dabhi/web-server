@@ -144,67 +144,67 @@ function cutMessage(buf) {
 }
 function serveClient(socket) {
     return __awaiter(this, void 0, void 0, function () {
-        var conn, buf, msg, data, reply;
-        return __generator(this, function (_a) {
-            switch (_a.label) {
+        var conn, buf, msg, data, reply, error_1;
+        var _a, _b;
+        return __generator(this, function (_c) {
+            switch (_c.label) {
                 case 0:
                     conn = socketInit(socket);
                     buf = { data: Buffer.alloc(0), length: 0 };
-                    _a.label = 1;
+                    _c.label = 1;
                 case 1:
-                    if (!true) return [3 /*break*/, 8];
-                    msg = cutMessage(buf);
-                    if (!!msg) return [3 /*break*/, 3];
-                    return [4 /*yield*/, socketRead(conn)];
+                    _c.trys.push([1, 10, 11, 12]);
+                    _c.label = 2;
                 case 2:
-                    data = _a.sent();
-                    bufPush(buf, data);
-                    if (data.length === 0) {
-                        console.log("Closing connection");
-                        return [2 /*return*/];
-                    }
-                    return [3 /*break*/, 1];
+                    if (!true) return [3 /*break*/, 9];
+                    msg = cutMessage(buf);
+                    if (!!msg) return [3 /*break*/, 4];
+                    return [4 /*yield*/, socketRead(conn)];
                 case 3:
-                    if (!msg.equals(Buffer.from("quit\n"))) return [3 /*break*/, 5];
-                    return [4 /*yield*/, socketWrite(conn, Buffer.from("Bye.\n"))];
+                    data = _c.sent();
+                    if (data.length === 0) {
+                        console.log("Connection ended by client");
+                        return [3 /*break*/, 9];
+                    }
+                    bufPush(buf, data);
+                    return [3 /*break*/, 2];
                 case 4:
-                    _a.sent();
-                    socket.destroy();
-                    return [2 /*return*/];
+                    if (!(msg.toString().trim() === "Quit")) return [3 /*break*/, 6];
+                    return [4 /*yield*/, socketWrite(conn, Buffer.from("Bye.\n"))];
                 case 5:
+                    _c.sent();
+                    return [3 /*break*/, 9];
+                case 6:
                     reply = Buffer.concat([Buffer.from("Echo: "), msg]);
                     return [4 /*yield*/, socketWrite(conn, reply)];
-                case 6:
-                    _a.sent();
-                    _a.label = 7;
-                case 7: return [3 /*break*/, 1];
-                case 8: return [2 /*return*/];
+                case 7:
+                    _c.sent();
+                    _c.label = 8;
+                case 8: return [3 /*break*/, 2];
+                case 9: return [3 /*break*/, 12];
+                case 10:
+                    error_1 = _c.sent();
+                    console.error("Error in serveClient: ", error_1);
+                    return [3 /*break*/, 12];
+                case 11:
+                    console.log("Closing connection for ", ((_a = conn === null || conn === void 0 ? void 0 : conn.socket) === null || _a === void 0 ? void 0 : _a.remoteAddress) + ":" + ((_b = conn === null || conn === void 0 ? void 0 : conn.socket) === null || _b === void 0 ? void 0 : _b.remotePort));
+                    socket.end();
+                    return [7 /*endfinally*/];
+                case 12: return [2 /*return*/];
             }
         });
     });
 }
 function newConnection(socket) {
     return __awaiter(this, void 0, void 0, function () {
-        var excp_1;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
                     console.log("New connection from ", socket.remoteAddress + ":" + socket.remotePort);
-                    _a.label = 1;
-                case 1:
-                    _a.trys.push([1, 3, 4, 5]);
                     return [4 /*yield*/, serveClient(socket)];
-                case 2:
+                case 1:
                     _a.sent();
-                    return [3 /*break*/, 5];
-                case 3:
-                    excp_1 = _a.sent();
-                    console.error("Exception: ", excp_1);
-                    return [3 /*break*/, 5];
-                case 4:
-                    socket.destroy();
-                    return [7 /*endfinally*/];
-                case 5: return [2 /*return*/];
+                    return [2 /*return*/];
             }
         });
     });

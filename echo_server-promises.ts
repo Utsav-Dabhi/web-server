@@ -159,31 +159,35 @@ async function serveClient(socket: net.Socket): Promise<void> {
   const conn: TCPConn = socketInit(socket);
   const buf: DynBuf = { data: Buffer.alloc(0), length: 0 };
 
-  while (true) {
-    // try to get 1 message from the buffer
-    const msg: null | Buffer = cutMessage(buf);
+  try {
+    while (true) {
+      // try to get 1 message from the buffer
+      let msg: null | Buffer = cutMessage(buf);
 
-    if (!msg) {
-      const data: Buffer = await socketRead(conn);
-      bufPush(buf, data);
-
-      if (data.length === 0) {
-        console.log("Closing connection");
-        return;
+      if (!msg) {
+        const data: Buffer = await socketRead(conn);
+        if (data.length === 0) {
+          console.log("Connection ended by client");
+          break;
+        }
+        bufPush(buf, data);
+        continue;
       }
 
-      continue;
+      // process the message and send the response
+      if (msg.toString().trim() === "Quit") {
+        await socketWrite(conn, Buffer.from("Bye.\n"));
+        break;
+      } else {
+        const reply = Buffer.concat([Buffer.from("Echo: "), msg]);
+        await socketWrite(conn, reply);
+      }
     }
-
-    // process the message and send the response
-    if (msg.equals(Buffer.from("quit\n"))) {
-      await socketWrite(conn, Buffer.from("Bye.\n"));
-      socket.destroy();
-      return;
-    } else {
-      const reply = Buffer.concat([Buffer.from("Echo: "), msg]);
-      await socketWrite(conn, reply);
-    }
+  } catch (error) {
+    console.error("Error in serveClient: ", error);
+  } finally {
+    console.log("Closing connection for ", conn?.socket?.remoteAddress + ":" + conn?.socket?.remotePort);
+    socket.end();
   }
 }
 
@@ -193,13 +197,7 @@ async function newConnection(socket: net.Socket): Promise<void> {
     socket.remoteAddress + ":" + socket.remotePort
   );
 
-  try {
-    await serveClient(socket);
-  } catch (excp) {
-    console.error("Exception: ", excp);
-  } finally {
-    socket.destroy();
-  }
+  await serveClient(socket);
 }
 
 const server = net.createServer({
