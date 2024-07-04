@@ -186,7 +186,10 @@ async function serveClient(socket: net.Socket): Promise<void> {
   } catch (error) {
     console.error("Error in serveClient: ", error);
   } finally {
-    console.log("Closing connection for ", conn?.socket?.remoteAddress + ":" + conn?.socket?.remotePort);
+    console.log(
+      "Closing connection for ",
+      conn?.socket?.remoteAddress + ":" + conn?.socket?.remotePort
+    );
     socket.end();
   }
 }
